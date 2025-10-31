@@ -33,18 +33,27 @@ class BilibiliAPI:
             'Referer': 'https://www.bilibili.com',
             'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Origin': 'https://www.bilibili.com'
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site'
+        }
+
+        # 基础cookies，即使没有登录也添加一些基本的
+        self.cookies = {
+            'buvid3': buvid3 or 'default_buvid3',
+            'b_nut': str(int(time.time())),
         }
 
         if sessdata:
-            self.cookies = {
+            self.cookies.update({
                 'SESSDATA': sessdata,
                 'bili_jct': bili_jct or '',
-                'buvid3': buvid3 or ''
-            }
+                'buvid3': buvid3
+            })
             print("✓ 已加载登录凭证")
         else:
-            self.cookies = {}
             print("ℹ 未配置登录凭证，将以游客模式运行")
 
     def extract_bvid_from_url(self, url: str) -> Optional[str]:
@@ -165,10 +174,28 @@ class BilibiliAPI:
             url = 'https://api.bilibili.com/x/web-interface/view'
             params = {'bvid': bvid}
 
-            response = requests.get(url, headers=self.headers, cookies=self.cookies, params=params, timeout=10)
-            response.raise_for_status()
+            # 更新Referer为具体视频页
+            headers = self.headers.copy()
+            headers['Referer'] = f'https://www.bilibili.com/video/{bvid}'
 
-            data = response.json()
+            response = requests.get(url, headers=headers, cookies=self.cookies, params=params, timeout=10)
+
+            # 不立即抛出异常，先检查响应
+            if response.status_code != 200:
+                print(f"⚠️  API返回状态码: {response.status_code}")
+                # 尝试解析响应
+                try:
+                    data = response.json()
+                    if 'data' in data and data['data']:
+                        print("✓ 尽管状态码异常，仍成功获取到数据")
+                    else:
+                        print(f"❌ API返回错误: {data.get('message', 'Unknown error')}")
+                        return None
+                except:
+                    print(f"❌ 无法解析响应内容")
+                    return None
+            else:
+                data = response.json()
 
             if data.get('code') != 0:
                 print(f"❌ API返回错误: {data.get('message', 'Unknown error')}")
@@ -196,6 +223,10 @@ class BilibiliAPI:
 
             return video_info
 
+        except requests.exceptions.HTTPError as e:
+            print(f"❌ HTTP错误: {e}")
+            print("💡 提示: 该视频可能需要登录才能访问，请配置Cookie")
+            return None
         except Exception as e:
             print(f"❌ 获取视频信息失败: {str(e)}")
             return None
